@@ -20,3 +20,11 @@ open software and open hardware platform for developing an alternative crank bas
 - http://keithhack.blogspot.com
 - www.thisisant.com
 - https://jbremnant.wordpress.com/
+- rock-o-mat
+- Dan Maloney
+- chiprobot
+- Brian Benchoff
+- brodykenrick https://github.com/brodykenrick/ANTPlus_Arduino <- big thanks for mapping out the nrfap2 pins
+- http://archive.fabacademy.org/fabacademy2017/fablabbcn/students/141/Final%20Project.html
+- Olav Kallhovd
+- Kevin Townsend
