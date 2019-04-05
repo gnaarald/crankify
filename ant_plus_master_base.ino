@@ -1,4 +1,4 @@
-#include "HX711.h" //load cell amp library
+#include <HX711.h> //load cell amp library (bogde)
 #include <Adafruit_Sensor.h> // 10DOF sensor libraries with i2c support
 #include <Wire.h>
 #include <Adafruit_10DOF.h>
@@ -49,7 +49,8 @@ const byte DOUT = 3;
 const byte CLK = 7;
 
 //Change this calibration factor as per your load cell once it is found you many need to vary it in thousands
-float calibration_factor = -40600; //-106600 worked for my 40Kg max scale setup. Use EEPROM to set the factor according to temp
+float calibration_factor = -106600;
+ //-106600 worked for my 40Kg max scale setup. Use EEPROM to set the factor according to temp
 
 Adafruit_10DOF                dof   = Adafruit_10DOF();
 Adafruit_LSM303_Accel_Unified accel = Adafruit_LSM303_Accel_Unified(30301);
@@ -79,6 +80,11 @@ int tilt;
 unsigned long angle_time = 0;
 int prev_angle = 0;
 uint8_t RPM;
+uint16_t ANT_Torque = 0;
+uint16_t ANT_Period = 0;
+uint16_t ANT_Power = 0;
+double Torque_sum = 0;
+uint8_t ANT_ticks = 0;
 
 void isr_ant()
 {
@@ -110,15 +116,9 @@ void setup() {
   digitalWrite(SUSPEND_PIN, HIGH);
   digitalWrite(SLEEP_PIN,   LOW);
   ANTSerial.begin(9600);
-  /*while(!ANTSerial)
-  {
-    ;
-  }*/
-  //reset();
   delay(100);
   scale.set_scale();  // Start scale
   delay(5000);
-  //ANTSerial.flush();
   Serial.flush();
   delay(50);
   initiate();
@@ -129,29 +129,25 @@ void setup() {
 }
 
 void read_hx711(){
-  int i = 0;
-  uint16_t measure = 0;
-  //while(i < 3){
-    //measure += abs(scale.get_units(100) / 0.10197162129779f);
-    //i++;
-  //}
-  //if (i >= 3){
-    HX711_instPower = abs(scale.get_units(15) / 0.10197162129779f); //return instantaneous power in W
-    //i = 0;
-  //}
-  ANT_power_total += HX711_instPower;
-  if(ANT_power_total > 65535) ANT_power_total = 0;
-  //return HX711_instPower;
+    Serial.print("ANT_Torque: ");
+    Serial.println(ANT_Torque);
+    ANT_Torque += abs(scale.read() * 0.0098065f) * 0.1725f;
+    Torque_sum = ANT_Torque * 2;
+
+  if(ANT_Torque > 65535) ANT_Torque = 0;
   }
+  
 void calibrate_hx711(){
-  scale.tare();
-  scale.set_scale(calibration_factor); //Adjust to this calibration factor
-  long zero_factor = scale.read_average(); //Get a baseline reading
+  long zero_factor = scale.read_average(byte(10)); //Get a baseline reading
   Serial.print("Zero factor: "); //This can be used to remove the need to tare the scale. Useful in permanent scale projects.
   Serial.println(zero_factor);
+  //scale.power_down();
   }
 void init_hx711(){
-  scale.set_scale(calibration_factor);
+  scale.power_up();
+  scale.set_gain(byte(1));
+  scale.tare();
+  scale.set_scale(calibration_factor); //Adjust to this calibration factor
   }
 
 void initSensors()
@@ -182,52 +178,39 @@ void initSensors()
   }
 }
 void angularVelociy(){
-  if(angle_time = 0){
+  if(angle_time == 0){
     prev_angle = tilt;
     displaySensorData();
-    angle_time = micros();
+    angle_time = millis();
     //angularVelocity(); //recursive call
   }
   else{
     /*   w = da/dt    */
-    RPM = uint8_t(long(((prev_angle - tilt)%360)/((micros()-angle_time)*1000000) *0.1667F));
-    Serial.println(uint8_t(long(((prev_angle - tilt)%360)/((micros()-angle_time)*1000000) *0.166666667)));
+    RPM = uint8_t(long(((prev_angle - tilt)%360)/((millis()-angle_time)*1000000.0F) * 0.1667F));
+    Serial.print("RPM: ");
+    Serial.println(uint8_t(long(((prev_angle - tilt)%360)/((millis()-angle_time)*1000000.0F) *0.166666667F)));
+    Serial.print("ANT_Period: ");
+    Serial.println(ANT_Period);
+    ANT_Period += uint16_t(double(millis()-angle_time)*2.048f);
+    if(prev_angle > tilt){
+      //prev ~300, new ~60
+      ANT_ticks++;
+    }
+    if(ANT_ticks > 255) ANT_ticks = 0;
     prev_angle = tilt;
+    Serial.print("tilt: ");
+    Serial.println(tilt);
     angle_time = millis();
   }
+  ANT_Power +=uint16_t(double(Torque_sum * (double(RPM)/60)*6.28));
 }
+
 void displaySensorData(){
   float roll, pitch, heading;
-  //sensors_event_t gyro_event;
-  //sensors_event_t accel_event;
   sensors_event_t mag_event;
 
-  // Get new data samples
-  //gyro.getEvent(&gyro_event);
-  //accel.getEvent(&accel_event);
   mag.getEvent(&mag_event);
 
-  // Apply mag offset compensation (base values in uTesla)
-  //float x = mag_event.magnetic.x - mag_offsets[0];
-  //float y = mag_event.magnetic.y - mag_offsets[1];
-  //float z = mag_event.magnetic.z - mag_offsets[2];
-
-  // Apply mag soft iron error compensation
-  //float mx = x * mag_softiron_matrix[0][0] + y * mag_softiron_matrix[0][1] + z * mag_softiron_matrix[0][2];
-  //float my = x * mag_softiron_matrix[1][0] + y * mag_softiron_matrix[1][1] + z * mag_softiron_matrix[1][2];
-  //float mz = x * mag_softiron_matrix[2][0] + y * mag_softiron_matrix[2][1] + z * mag_softiron_matrix[2][2];
-
-  // The filter library expects gyro data in degrees/s, but adafruit sensor
-  // uses rad/s so we need to convert them first (or adapt the filter lib
-  // where they are being converted)
-  //float gx = gyro_event.gyro.x * 57.2958F;
-  //float gy = gyro_event.gyro.y * 57.2958F;
-  //float gz = gyro_event.gyro.z * 57.2958F;
-
-  // Update the filter
-  /*filter.update(gx, gy, gz,
-                accel_event.acceleration.x, accel_event.acceleration.y, accel_event.acceleration.z,
-                mx, my, mz);*/
   sensors_vec_t   orientation;
 
   if (dof.magGetOrientation(SENSOR_AXIS_Z, &mag_event, &orientation))
@@ -235,84 +218,28 @@ void displaySensorData(){
     /* 'orientation' should have valid .heading data now */
     tilt = (int)orientation.heading;
   }
-  // Print the orientation filter output
-  /*if (readyToPrint()) {
-    // print the heading, pitch and roll
-    roll = filter.getRoll();
-    pitch = filter.getPitch();
-    heading = filter.getYaw();
-    Serial.print(heading);
-    Serial.print(",");
-    Serial.print(pitch);
-    Serial.print(",");
-    Serial.println(roll);
-  }*/
-}
-bool readyToPrint() {
-  static unsigned long nowMillis;
-  static unsigned long thenMillis;
-
-  // If the Processing visualization sketch is sending "s"
-  // then send new data each time it wants to redraw
-  while (Serial.available()) {
-    int val = Serial.read();
-    if (val == 's') {
-      thenMillis = millis();
-      return true;
-    }
-  }
-  // Otherwise, print 8 times per second, for viewing as
-  // scrolling numbers in the Arduino Serial Monitor
-  nowMillis = millis();
-  if (nowMillis - thenMillis > 125) {
-    thenMillis = nowMillis;
-    return true;
-  }
-  return false;
 }
 
 int state_counter;
 int event_counter = 0;
 boolean clear_to_send = false;
-short event_count = 0; // this is basicpower update increment
+short event_count_basic = 0; // this is basicpower update increment
+short event_count_torque = 0;
 int loop_skip = 0;
 
 void loop() {
-  if(loop_skip % 10 == 0) 
-  {
-    angularVelociy();
-    Serial.print("RPM: ");
-    Serial.println(RPM);
-  }
+  angularVelociy();
+  Serial.print("RPM: ");
+  Serial.println(RPM);
   //ANTrec();
   read_hx711();
   ANTsendreceive();
-  loop_skip++;
 }
 void ANTsendreceive(){
-  //Print out everything received from the ANT chip (original debug)
-  /*if (ANTSerial.available())
-  {
-    Serial.print("RECV: 0x");
-    while(ANTSerial.available())
-    {
-      Serial.print(ANTSerial.read(), HEX );
-      Serial.print(" ");
-    }
-    Serial.println(".");
-  }*/
   int sbuflength = ANTSerial.available();
   uint8_t msg = 0;
   while(sbuflength > 0)
   {
-    /*Serial.print("sync: ");
-    Serial.println(sync);
-    Serial.print("msglength: ");
-    Serial.println(msglength);
-    Serial.print("msgsync: ");
-    Serial.println(msgsync);
-    Serial.print("Free RAM: ");
-    Serial.println(freeRam());*/
     if (msgsync == 0)
     {
       msg = ANTSerial.read();
@@ -351,24 +278,20 @@ void ANTsendreceive(){
   }
   if(state == 1)
   {
-    //Serial.print("Received RTS Interrupt. ");  
     //Clear the ISR
     state = 0;
     
     if( digitalRead(RTS_PIN) == LOW )
     {
-      //Serial.println("Host CTS (ANT is ready to receive again).");
       displaySensorData(); //use roll value for angle
       clear_to_send = true;
     }
     else
     {
-      //Serial.print("Waiting for ANT to let us send again.");  
       //Need to make sure it is low again
       while( digitalRead(RTS_PIN) != LOW )
       {
-            //Serial.print(".");
-            //delay(50);
+
       }
       clear_to_send = true;
     }
@@ -378,9 +301,7 @@ void ANTsendreceive(){
   {
     if((state_counter%2) == 0)
     {
-      //Serial.println("Wait...");
       basicpower();
-      //delay(200);
     }
     else
     if(state_counter %120 == 0)
@@ -397,9 +318,6 @@ void ANTsendreceive(){
     {
       state_counter = 0;
       reset();
-      //Serial.println("That's all folks!!! [Aborting to exit.]");
-      //Serial.flush();
-      //abort();
     }
     state_counter++;
   }
@@ -412,14 +330,6 @@ void ANTrec()
   uint8_t msg = 0;
   while(sbuflength > 0)
   {
-    /*Serial.print("sync: ");
-    Serial.println(sync);
-    Serial.print("msglength: ");
-    Serial.println(msglength);
-    Serial.print("msgsync: ");
-    Serial.println(msgsync);
-    Serial.print("Free RAM: ");
-    Serial.println(freeRam());*/
     if (msgsync == 0)
     {
       msg = ANTSerial.read();
@@ -455,13 +365,6 @@ void ANTrec()
       msglength = 0;
       ANTrecproc(msgbuf, msglength);
     }
-    /*else {
-      Serial.println(ANTSerial.read());
-      msgsync = 0;
-      sync = sync-1;
-      msglength = msglength -1;
-    }*/
-  //Serial.println("Calling major sixta");
   }
 }
 
@@ -473,20 +376,17 @@ void ANTrecproc(uint8_t ANTbuf[], uint8_t ANTlength)
     {
       if (ANTbuf[5] == 3)
       {
-        //Serial.print("transmit success, sendcount: ");
-        //Serial.println(sendcount % 120);
+        Serial.print("transmit success, sendcount: ");
+        Serial.println(sendcount);
+        Serial.print("time:");
+        Serial.println(millis());
         basicpower();
-        /*if (sendcount % 1 == 0)
-        {
-          basicpower();
-          //sendcount = 0;
-          //Serial.println(sendcount);
-        }*/
         if (sendcount % 4 == 0)
         {
           //basicpower();
-          //cranktorque();
-          //Serial.println("Basic Power");
+          cranktorque();
+          Serial.print("Crank Torque: ");
+          Serial.println(ANT_Torque);
         }
         if (sendcount % 120 == 0)
         {
@@ -625,14 +525,14 @@ void SetPublicNetwork()
     buf[1] = 0x09; // LENGTH Byte
     buf[2] = MESG_NETWORK_KEY_ID; // ID Byte
     buf[3] = 0x00; // Data Byte N (
-    buf[4] = 0xB9; // Data Byte N (N=LENGTH)
-    buf[5] = 0xA5; // Data Byte N (N=LENGTH)
-    buf[6] = 0x21; // Data Byte N (N=LENGTH)
-    buf[7] = 0xFB; // Data Byte N (N=LENGTH)
-    buf[8] = 0xBD; // Data Byte N (N=LENGTH)
-    buf[9] = 0x72; // Data Byte N (N=LENGTH)
-    buf[10] = 0xC3; // Data Byte N (N=LENGTH)
-    buf[11] = 0x45; // Data Byte N (N=LENGTH)
+    buf[4] = 0x00; // Data Byte N (N=LENGTH)
+    buf[5] = 0x00; // Data Byte N (N=LENGTH)
+    buf[6] = 0x00; // Data Byte N (N=LENGTH)
+    buf[7] = 0x00; // Data Byte N (N=LENGTH)
+    buf[8] = 0x00; // Data Byte N (N=LENGTH)
+    buf[9] = 0x00; // Data Byte N (N=LENGTH)
+    buf[10] = 0x00; // Data Byte N (N=LENGTH)
+    buf[11] = 0x00; // Data Byte N (N=LENGTH)
     buf[12] = checkSum(buf, 12);
     ANTsend(buf,13);
 }
@@ -771,17 +671,17 @@ void basicpower()
     buf[2] = MESG_BROADCAST_DATA_ID; // 0x4E
     buf[3] = 0x00;  // Channel number
     buf[4] = 0x10; // Basic power page identifier
-    buf[5] = byte(event_count); // Event count
+    buf[5] = byte(event_count_basic); // Event count
     buf[6] = 0xB2; // Power differential (pedal power) 0xFF when not used
     buf[7] = byte(RPM); // Instantaneous Cadence (0-254 rpm)
     buf[8] = byte(ANT_power_total & 0xFF); // Accumulated power LSB
     buf[9] = byte((ANT_power_total >> 8) & 0xFF); // Accumulated power MSB
-    buf[10] = byte(HX711_instPower & 0xFF); // Instantaneous power LSB
-    buf[11] = byte((HX711_instPower >> 8) & 0xFF); // Instantaneous power MSB
+    buf[10] = 0x00;//byte(HX711_instPower & 0xFF); // Instantaneous power LSB
+    buf[11] = 0x00;//byte((HX711_instPower >> 8) & 0xFF); // Instantaneous power MSB
     buf[12] = checkSum(buf, 12);
     ANTsend(buf, 13);
-    event_count++;
-    if(event_count > 254) event_count = 0;
+    event_count_basic++;
+    if(event_count_basic > 254) event_count_basic = 0;
 }
 
 void cranktorque()
@@ -793,16 +693,18 @@ void cranktorque()
     buf[1] = 0x09; // LENGTH Byte
     buf[2] = MESG_BROADCAST_DATA_ID; // 0x4E
     buf[3] = 0x00;  // Channel number
-    buf[4] = 0x20; // crank torque page identifier
-    buf[5] = 0x00; // Event count
-    buf[6] = 0x00; // slope MSB 1/10 Nm/Hz
-    buf[7] = 0x5B; // slope LSB
-    buf[8] = byte(HX711_instPower & 0xFF); // timestamp MSB
-    buf[9] = byte((HX711_instPower >> 8) & 0xFF); // timestamp LSB 1/2000s
-    buf[10] = byte(HX711_instPower & 0xFF); // torque ticks stamp MSB
-    buf[11] = byte((HX711_instPower >> 8) & 0xFF); // torque ticks LSB
+    buf[4] = 0x12; // crank torque page identifier
+    buf[5] = byte(event_count_torque); // Event count
+    buf[6] = byte(ANT_ticks); // crank ticks
+    buf[7] = byte(RPM); // instantaneous cadence
+    buf[8] = byte(ANT_Period & 0xFF); // timestamp MSB
+    buf[9] = byte((ANT_Period >> 8) & 0xFF); // timestamp LSB 1/2000s
+    buf[10] = byte(ANT_Torque & 0xFF); // torque ticks stamp MSB
+    buf[11] = byte((ANT_Torque >> 8) & 0xFF); // torque ticks LSB
     buf[12] = checkSum(buf, 12);
     ANTsend(buf, 13);
+    event_count_torque++;
+    if(event_count_torque > 254) event_count_torque = 0;
 }
 void commondata_manufacturer()
 {
