@@ -1,4 +1,6 @@
 open software and open hardware platform for developing an alternative crank based powermeter using ANT+ protocol and Arduino Nano which was started at a local Hackathon in March 2019. All source code, required libraries, design files and wiring instructions will be uploaded here.
+### Obtain the ANT+ Public Network Key from https://www.thisisant.com/developer/ant-plus/ant-plus-basics/network-keys by first becoming an Adopter
+
 ## Electronics components:
 - ANT+ module (nrfap2 breakout) - USD 21.58
 - Adafruit VERTER - USD 9.95
